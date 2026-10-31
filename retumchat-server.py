@@ -156,11 +156,14 @@ class Handler(BaseHTTPRequestHandler):
             with open(ruta_arch, "rb") as f:
                 datos = f.read()
             self.send_response(200)
-            tipo = "application/octet-stream"
-            if nombre.lower().endswith((".jpg", ".jpeg")): tipo = "image/jpeg"
-            elif nombre.lower().endswith(".png"): tipo = "image/png"
-            elif nombre.lower().endswith((".m4a", ".mp4")): tipo = "audio/mp4"
-            elif nombre.lower().endswith(".3gp"): tipo = "audio/3gpp"
+            tipos = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+                     ".m4a": "audio/mp4", ".mp4": "audio/mp4", ".3gp": "audio/3gpp",
+                     ".mp3": "audio/mpeg", ".wav": "audio/wav", ".ogg": "audio/ogg",
+                     ".opus": "audio/ogg", ".aac": "audio/aac", ".flac": "audio/flac",
+                     ".apk": "application/vnd.android.package-archive", ".pdf": "application/pdf",
+                     ".zip": "application/zip", ".txt": "text/plain; charset=utf-8"}
+            ext = os.path.splitext(nombre.lower())[1]
+            tipo = tipos.get(ext, "application/octet-stream")
             self.send_header("Content-Type", tipo)
             self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("Content-Length", str(len(datos)))
