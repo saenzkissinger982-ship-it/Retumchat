@@ -212,17 +212,19 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(b"event: open\ndata: {\"event\":\"open\"}\n\n")
         self.wfile.flush()
         ultimo = int(time.time()) if since is None else int(since)
+        enviados = set()
         try:
             while True:
                 with cond:
                     cond.wait(timeout=20)
                 filas = self._traer(topic, ultimo)
                 for e in filas:
+                    if e["id"] in enviados:
+                        continue
+                    enviados.add(e["id"])
                     self.wfile.write(("data: " + json.dumps(e, ensure_ascii=False) + "\n\n").encode("utf-8"))
-                    if e.get("time", 0) >= ultimo:
+                    if int(e["time"]) > ultimo:
                         ultimo = int(e["time"])
-                    elif filas:
-                        ultimo = max(ultimo, int(e["time"]))
                 self.wfile.write(b": latido\n\n")
                 self.wfile.flush()
         except Exception:
