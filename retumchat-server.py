@@ -31,19 +31,22 @@ FP_VENTANA = 25  # segundos
 
 
 def huella(ruta, nombre, cuerpo):
+    # el nombre del archivo no entra: asi el mismo sticker o foto reenviada
+    # se reconoce como repetida y no se guarda dos veces
     h = hashlib.sha1()
-    h.update((ruta + "|" + (nombre or "") + "|" + str(len(cuerpo))).encode("utf-8"))
+    h.update((ruta + "|" + str(len(cuerpo))).encode("utf-8"))
     h.update(cuerpo)
     return h.hexdigest()
 
 
-def duplicado_reciente(fp):
+def duplicado_reciente(fp, ventana=None):
+    v = FP_VENTANA if ventana is None else ventana
     ahora = time.time()
     with FP_LOCK:
-        for k in [k for k, v in FP.items() if ahora - v[1] > FP_VENTANA]:
+        for k in [k for k, vv in FP.items() if ahora - vv[1] > max(v, FP_VENTANA)]:
             FP.pop(k, None)
         prev = FP.get(fp)
-        if prev and ahora - prev[1] <= FP_VENTANA:
+        if prev and ahora - prev[1] <= v:
             return prev[0]
     return None
 
@@ -220,7 +223,7 @@ class Handler(BaseHTTPRequestHandler):
         att = None
         nombre = self.headers.get("Filename")
         fp = huella(ruta, nombre, cuerpo)
-        previo = duplicado_reciente(fp)
+        previo = duplicado_reciente(fp, 90 if nombre else 25)
         if previo is not None:
             return self._json(previo)
         if nombre:
