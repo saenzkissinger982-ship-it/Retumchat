@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 WORKDIR /app
 COPY . .
-ENV PORT=7860
-EXPOSE 7860
-CMD ["python3", "retumchat-server.py"]
+ENV PYTHONUNBUFFERED=1
+EXPOSE 8090
+CMD python3 retumchat-server.py
