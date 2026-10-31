@@ -48,6 +48,31 @@ def duplicado_reciente(fp):
     return None
 
 
+# --- quienes estan usando la app ---
+PRES = {}
+PRES_LOCK = threading.Lock()
+PRES_VENTANA = 70
+
+
+def presencia_actualizar(nick):
+    if not nick:
+        return 0
+    with PRES_LOCK:
+        PRES[nick] = time.time()
+        ahora = time.time()
+        for k in [k for k, v in PRES.items() if ahora - v > PRES_VENTANA]:
+            PRES.pop(k, None)
+        return len(PRES)
+
+
+def presencia_contar():
+    with PRES_LOCK:
+        ahora = time.time()
+        for k in [k for k, v in PRES.items() if ahora - v > PRES_VENTANA]:
+            PRES.pop(k, None)
+        return len(PRES), sorted(PRES.keys())
+
+
 def recordar(fp, evento):
     with FP_LOCK:
         FP[fp] = (evento, time.time())
@@ -145,6 +170,16 @@ class Handler(BaseHTTPRequestHandler):
         ruta = urlparse(self.path).path.strip("/")
         if not ruta:
             return self._json({"error": "falta el canal"}, 400)
+        if ruta == "presencia":
+            largo = int(self.headers.get("Content-Length") or 0)
+            cuerpo = self.rfile.read(largo) if largo else b"{}"
+            try:
+                nick = json.loads(cuerpo.decode("utf-8", "replace")).get("n", "")
+            except Exception:
+                nick = ""
+            total = presencia_actualizar(nick.strip()[:40])
+            return self._json({"online": total})
+
         largo = int(self.headers.get("Content-Length") or 0)
         cuerpo = self.rfile.read(largo) if largo else b""
         att = None
@@ -181,6 +216,10 @@ class Handler(BaseHTTPRequestHandler):
 
         if ruta in ("", "health"):
             return self._json({"ok": True, "server": "RetumChat", "hora": int(time.time())})
+
+        if ruta == "presencia":
+            total, nombres = presencia_contar()
+            return self._json({"online": total, "nombres": nombres})
 
         if ruta.startswith("file/"):
             nombre = os.path.basename(ruta[5:])
