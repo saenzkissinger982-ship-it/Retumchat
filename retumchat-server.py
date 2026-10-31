@@ -2,6 +2,7 @@
 # RetumChat Server · servidor de chat propio para Termux
 # Uso: python3 retumchat-server.py [puerto]
 import base64
+import hashlib
 import json
 import os
 import re
@@ -22,6 +23,34 @@ os.makedirs(FILES, exist_ok=True)
 
 lock = threading.Lock()
 cond = threading.Condition(lock)
+
+# --- control de reenvios duplicados ---
+FP_LOCK = threading.Lock()
+FP = {}          # huella -> (evento, momento)
+FP_VENTANA = 25  # segundos
+
+
+def huella(ruta, nombre, cuerpo):
+    h = hashlib.sha1()
+    h.update((ruta + "|" + (nombre or "") + "|" + str(len(cuerpo))).encode("utf-8"))
+    h.update(cuerpo)
+    return h.hexdigest()
+
+
+def duplicado_reciente(fp):
+    ahora = time.time()
+    with FP_LOCK:
+        for k in [k for k, v in FP.items() if ahora - v[1] > FP_VENTANA]:
+            FP.pop(k, None)
+        prev = FP.get(fp)
+        if prev and ahora - prev[1] <= FP_VENTANA:
+            return prev[0]
+    return None
+
+
+def recordar(fp, evento):
+    with FP_LOCK:
+        FP[fp] = (evento, time.time())
 
 def db():
     c = sqlite3.connect(DB, timeout=10)
@@ -120,6 +149,10 @@ class Handler(BaseHTTPRequestHandler):
         cuerpo = self.rfile.read(largo) if largo else b""
         att = None
         nombre = self.headers.get("Filename")
+        fp = huella(ruta, nombre, cuerpo)
+        previo = duplicado_reciente(fp)
+        if previo is not None:
+            return self._json(previo)
         if nombre:
             tipo = self.headers.get("Content-Type") or "application/octet-stream"
             safe = re.sub(r"[^A-Za-z0-9._-]", "_", unquote(nombre))
@@ -137,6 +170,7 @@ class Handler(BaseHTTPRequestHandler):
         if att:
             ev["attachment"] = {"name": att["name"], "type": att["type"],
                                 "size": att["size"], "url": "/file/" + os.path.basename(att["path"])}
+        recordar(fp, ev)
         return self._json(ev)
 
     # ---------- leer ----------
