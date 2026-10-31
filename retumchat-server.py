@@ -291,8 +291,7 @@ class Handler(BaseHTTPRequestHandler):
         enviados = set()
         try:
             while True:
-                with cond:
-                    cond.wait(timeout=20)
+                # primero entrega lo que ya hay, despues se queda esperando
                 filas = self._traer(topic, ultimo)
                 for e in filas:
                     if e["id"] in enviados:
@@ -303,6 +302,8 @@ class Handler(BaseHTTPRequestHandler):
                         ultimo = int(e["time"])
                 self.wfile.write(b": latido\n\n")
                 self.wfile.flush()
+                with cond:
+                    cond.wait(timeout=15)
         except Exception:
             return
 
