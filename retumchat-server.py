@@ -89,6 +89,8 @@ def init():
         attach_name TEXT, attach_type TEXT, attach_path TEXT, attach_size INTEGER,
         ts INTEGER)""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_topic_ts ON mensajes(topic, ts)")
+    c.execute("""CREATE TABLE IF NOT EXISTS perfiles (
+        nombre TEXT PRIMARY KEY, archivo TEXT, admin INTEGER, ts INTEGER)""")
     c.commit()
     c.close()
 
@@ -170,6 +172,38 @@ class Handler(BaseHTTPRequestHandler):
         ruta = urlparse(self.path).path.strip("/")
         if not ruta:
             return self._json({"error": "falta el canal"}, 400)
+        if ruta == "perfil":
+            largo = int(self.headers.get("Content-Length") or 0)
+            cuerpo = self.rfile.read(largo) if largo else b"{}"
+            try:
+                datos = json.loads(cuerpo.decode("utf-8", "replace"))
+                nombre = (datos.get("n") or "").strip()[:40]
+                foto = datos.get("foto") or ""
+            except Exception:
+                return self._json({"error": "datos invalidos"}, 400)
+            if not nombre:
+                return self._json({"error": "falta el nombre"}, 400)
+            if not foto:
+                return self._json({"error": "falta la foto"}, 400)
+            try:
+                crudo = base64.b64decode(foto.split(",")[-1])
+            except Exception:
+                return self._json({"error": "foto invalida"}, 400)
+            if len(crudo) > 3 * 1024 * 1024:
+                return self._json({"error": "foto muy grande"}, 413)
+            archivo = "perfil_" + hashlib.md5(nombre.lower().encode("utf-8")).hexdigest() + ".jpg"
+            ruta_perfil = os.path.join(FILES, archivo)
+            with open(ruta_perfil, "wb") as f:
+                f.write(crudo)
+            admin = 1 if "retumbero" in nombre.lower() else 0
+            c = db()
+            c.execute("INSERT INTO perfiles (nombre, archivo, admin, ts) VALUES (?,?,?,?) "
+                      "ON CONFLICT(nombre) DO UPDATE SET archivo=excluded.archivo, admin=excluded.admin, ts=excluded.ts",
+                      (nombre, archivo, admin, int(time.time())))
+            c.commit()
+            c.close()
+            return self._json({"ok": True, "n": nombre, "url": "/file/" + archivo, "admin": admin})
+
         if ruta == "presencia":
             largo = int(self.headers.get("Content-Length") or 0)
             cuerpo = self.rfile.read(largo) if largo else b"{}"
@@ -216,6 +250,23 @@ class Handler(BaseHTTPRequestHandler):
 
         if ruta in ("", "health"):
             return self._json({"ok": True, "server": "RetumChat", "hora": int(time.time())})
+
+        if ruta == "perfiles":
+            lista = []
+            c = db()
+            try:
+                for f in c.execute("SELECT nombre, archivo, admin, ts FROM perfiles ORDER BY ts DESC LIMIT 200").fetchall():
+                    if f["archivo"] and os.path.isfile(os.path.join(FILES, f["archivo"])):
+                        lista.append({"n": f["nombre"], "url": "/file/" + f["archivo"],
+                                      "admin": int(f["admin"] or 0), "ts": f["ts"]})
+                # tambien la gente que ya escribio alguna vez
+                nombres = set(x["n"] for x in lista)
+                for f in c.execute("SELECT DISTINCT author FROM mensajes WHERE author <> '' LIMIT 300").fetchall():
+                    if f["author"] not in nombres:
+                        lista.append({"n": f["author"], "url": "", "admin": 0, "ts": 0})
+            finally:
+                c.close()
+            return self._json({"perfiles": lista})
 
         if ruta == "presencia":
             total, nombres = presencia_contar()
