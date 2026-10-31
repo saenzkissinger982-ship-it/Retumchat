@@ -195,7 +195,8 @@ class Handler(BaseHTTPRequestHandler):
             ruta_perfil = os.path.join(FILES, archivo)
             with open(ruta_perfil, "wb") as f:
                 f.write(crudo)
-            admin = 1 if "retumbero" in nombre.lower() else 0
+            nl = nombre.lower()
+            admin = 1 if ("retumbero" in nl and "agente" not in nl) else 0
             c = db()
             c.execute("INSERT INTO perfiles (nombre, archivo, admin, ts) VALUES (?,?,?,?) "
                       "ON CONFLICT(nombre) DO UPDATE SET archivo=excluded.archivo, admin=excluded.admin, ts=excluded.ts",
