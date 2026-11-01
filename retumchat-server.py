@@ -154,6 +154,44 @@ def desde(item):
         return val
     return int(time.time()) - val
 
+VOZ = {}
+VOZ_LOCK = threading.Lock()
+VOZ_MAX = 40
+VOZ_TTL = 120
+
+
+def voz_lado(sala, lado):
+    d = VOZ.setdefault(sala, {})
+    if "t" not in d:
+        d["t"] = time.time()
+    d["t"] = time.time()
+    if lado not in d:
+        d[lado] = {"base": 0, "siguiente": 0, "trozos": []}
+    return d[lado]
+
+
+def voz_push(sala, lado, datos):
+    with VOZ_LOCK:
+        # limpiar salas viejas
+        for k in [k for k, v in VOZ.items() if time.time() - v.get("t", 0) > VOZ_TTL]:
+            VOZ.pop(k, None)
+        d = voz_lado(sala, lado)
+        d["trozos"].append(datos)
+        d["siguiente"] += 1
+        if len(d["trozos"]) > VOZ_MAX:
+            del d["trozos"][:len(d["trozos"]) - VOZ_MAX]
+        d["base"] = d["siguiente"] - len(d["trozos"])
+
+
+def voz_tomar(sala, lado, desde):
+    with VOZ_LOCK:
+        d = voz_lado(sala, lado)
+        if desde < d["base"]:
+            desde = d["base"]
+        trozos = d["trozos"][max(0, desde - d["base"]):]
+        return d["base"], d["siguiente"], b"".join(trozos)
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "RetumChat/1.0"
@@ -175,6 +213,17 @@ class Handler(BaseHTTPRequestHandler):
         ruta = urlparse(self.path).path.strip("/")
         if not ruta:
             return self._json({"error": "falta el canal"}, 400)
+        if ruta.startswith("voz/"):
+            partes = ruta.split("/")
+            if len(partes) != 3:
+                return self._json({"error": "usa voz/sala/lado"}, 400)
+            largo = int(self.headers.get("Content-Length") or 0)
+            if largo > 200000:
+                return self._json({"error": "audio muy grande"}, 413)
+            datos = self.rfile.read(largo) if largo else b""
+            if datos:
+                voz_push(partes[1], partes[2], datos)
+            return self._json({"ok": True})
         if ruta == "perfil":
             largo = int(self.headers.get("Content-Length") or 0)
             cuerpo = self.rfile.read(largo) if largo else b"{}"
@@ -254,6 +303,18 @@ class Handler(BaseHTTPRequestHandler):
 
         if ruta in ("", "health"):
             return self._json({"ok": True, "server": "RetumChat", "hora": int(time.time())})
+
+        if ruta.startswith("voz/"):
+            partes = ruta.split("/")
+            if len(partes) != 3:
+                return self._json({"error": "usa voz/sala/lado"}, 400)
+            try:
+                desde = int((q.get("n") or ["0"])[0])
+            except Exception:
+                desde = 0
+            base, siguiente, audio = voz_tomar(partes[1], partes[2], desde)
+            return self._json({"b": base, "n": siguiente,
+                               "audio": base64.b64encode(audio).decode("ascii")})
 
         if ruta == "perfiles":
             lista = []
